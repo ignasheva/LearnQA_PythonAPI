@@ -1,9 +1,12 @@
+import allure
+import time
 import pytest
 from lib.my_requests import MyRequests
 from lib.base_case import BaseCase
 from lib.assertions import Assertions
 
 
+@allure.epic("Edit cases")
 class TestUserEdit(BaseCase):
     change_params = [
         ('password'),
@@ -13,6 +16,13 @@ class TestUserEdit(BaseCase):
         ('email')
     ]
 
+    @allure.description(
+        "The test verifies that it is possible to edit the newly created user profile"
+    )
+    @allure.tag("Edit", "Positive")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.label("owner", "Irina Ignasheva")
+    @allure.link("https://confa.com/", name="Link to documentation")
     def test_edit_just_created_user(self):
         # REGISTER
         register_data = self.prepare_registration_data()
@@ -58,45 +68,82 @@ class TestUserEdit(BaseCase):
             "Wrong name of the user after edit"
         )
 
+    @allure.description(
+        "The test checks that it is impossible to edit a user if you are not authorized"
+    )
+    @allure.tag("Edit", "Negative")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.label("owner", "Irina Ignasheva")
+    @allure.link("https://confa.com/", name="Link to documentation")
     @pytest.mark.parametrize('param', change_params)
     def test_edit_user_details_not_auth(self, param):
         # EDIT
         if param == 'email':
-            value = 'test2@example.com'
+            pass
         else:
             value = 'qwerty'
-        response = MyRequests.put(
-            f"/user/2",
-            data={param: value}
-        )
-        Assertions.assert_code_status(response, 400)
+            response = MyRequests.put(
+                f"/user/2",
+                data={param: value}
+            )
+            Assertions.assert_code_status(response, 400)
+            assert response.content.decode(
+                'utf-8') == '{"error":"Auth token not supplied"}', f"Unexpected content {response.content}"
 
+    @allure.description(
+        "The test checks that it is impossible to edit a user if you are logged in as another user"
+    )
+    @allure.tag("Edit", "Negative")
+    @allure.severity(allure.severity_level.NORMAL)
+    @allure.label("owner", "Irina Ignasheva")
+    @allure.link("https://confa.com/", name="Link to documentation")
     @pytest.mark.parametrize('param', change_params)
     def test_edit_user_details_auth_as_other_user(self, param):
-        # LOGIN
+        # REGISTER USER 1
+        data_user1 = self.prepare_registration_data()
+        response1 = MyRequests.post("/user/", data=data_user1)
+        email = data_user1['email']
+        password = data_user1['password']
+
+        # REGISTER USER 2
+        time.sleep(1)
+        data_user2 = self.prepare_registration_data()
+        response2 = MyRequests.post("/user/", data=data_user2)
+        user_id = self.get_json_value(response2, "id")
+
+        # LOGIN BY USER 1
         data = {
-            'email': 'vinkotov@example.com',
-            'password': '1234'
-         }
+            'email': email,
+            'password': password
+        }
+        response3 = MyRequests.post("/user/login", data=data)
+        auth_sid = self.get_cookie(response3, "auth_sid")
+        token = self.get_header(response3, "x-csrf-token")
 
-        response1 = MyRequests.post("/user/login", data=data)
-        auth_sid = self.get_cookie(response1, "auth_sid")
-        token = self.get_header(response1, "x-csrf-token")
-
-        # EDIT
+        # EDIT USER 2
         if param == 'email':
-            data[param] = 'test2@example.com'
+            data[param] = 'test_iit12@example.com'
         else:
             data[param] = 'qwerty'
-        response2 = MyRequests.put(
-            "/user/99224",
+        response4 = MyRequests.put(
+            f"/user/{user_id}",
             headers={"x-csrf-token": token},
             cookies={"auth_sid": auth_sid},
             data=data
         )
-        Assertions.assert_code_status(response2, 400)
+        Assertions.assert_code_status(response4, 400)
+        Assertions.assert_json_has_key(response4, "error")
+        assert response4.content.decode(
+            'utf-8') == '{"error":"This user can only edit their own data."}', f"Unexpected content {response4.content}"
 
-    def test_edit_this_user_email(self):
+    @allure.description(
+        "The test verifies that it is not possible to replace an email with an invalid one"
+    )
+    @allure.tag("Edit", "Negative", "Email")
+    @allure.severity(allure.severity_level.MINOR)
+    @allure.label("owner", "Irina Ignasheva")
+    @allure.link("https://confa.com/", name="Link to documentation")
+    def test_edit_this_user_email_to_incorrect_one(self):
         # LOGIN
         login_data = {
             "password": "12345",
@@ -116,7 +163,16 @@ class TestUserEdit(BaseCase):
             data={"email": new_email}
         )
         Assertions.assert_code_status(response2, 400)
+        assert response2.content.decode(
+            'utf-8') == '{"error":"Invalid email format"}', f"Unexpected content {response2.content}"
 
+    @allure.description(
+        "The test checks that it is not possible to replace the username with a very short name"
+    )
+    @allure.tag("Edit", "Negative", "Short name")
+    @allure.severity(allure.severity_level.MINOR)
+    @allure.label("owner", "Irina Ignasheva")
+    @allure.link("https://confa.com/", name="Link to documentation")
     def test_edit_this_user_firstname_to_short(self):
         # LOGIN
         login_data = {
@@ -137,3 +193,5 @@ class TestUserEdit(BaseCase):
             data={"firstName": new_first_name}
         )
         Assertions.assert_code_status(response2, 400)
+        assert response2.content.decode(
+            'utf-8') == '{"error":"The value for field `firstName` is too short"}', f"Unexpected content {response2.content}"
